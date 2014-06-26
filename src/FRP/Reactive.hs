@@ -8,7 +8,7 @@ module FRP.Reactive
     , newEvent
     , animate
     , on
-    , Cachable(..)
+    , Cacheable(..)
       -- * Combinators
     , mergeWith
     , filterJust
@@ -138,7 +138,7 @@ data Edge a = Up a | Down a
 
 trigger :: Event a -> (Edge a -> IO ()) -> Interval ()
 trigger e f = do
-    latch <- liftSTM $ sample (signal e) >>= newTVar
+    latch <- liftSTM $ newTVar Nothing
     listen (signal e) $ \y -> do
         x <- atomically $ swapTVar latch y
         case (x, y) of
@@ -147,26 +147,25 @@ trigger e f = do
             _                  -> return ()
 
 on :: Event a -> (a -> IO ()) -> Interval ()
-on e f = trigger e rise
-  where
-    rise (Up a) = f a
-    rise _      = return ()
+on e f = trigger e $ \r -> case r of
+    Up a -> f a
+    _    -> return ()
 
-class Cachable f where
+class Cacheable f where
     cache :: f a -> Interval (f a)
 
-instance Cachable Event where
+instance Cacheable Event where
     cache e
         | cached (signal e) = return e
         | otherwise         = do
             initial     <- liftSTM $ sample (signal e)
             (b, update) <- newBehavior initial
             trigger e $ \r -> case r of
-                Up a -> update (Just a)
-                _    -> update Nothing
+                Up a   -> update (Just a)
+                Down _ -> update Nothing
             return (Event b)
 
-instance Cachable Behavior where
+instance Cacheable Behavior where
     cache b
         | cached b  = return b
         | otherwise = do
@@ -189,8 +188,8 @@ hold :: a -> Event a -> Interval (Behavior a)
 hold initial e = do
     (b, update) <- newBehavior initial
     trigger e $ \r -> case r of
+        Up _   -> return ()
         Down a -> update a
-        _      -> return ()
     return b
 
 switch :: Behavior (Event a) -> Event a
@@ -202,10 +201,10 @@ infixl 4 <@>, <@
 b <@> e = Event Behavior
     { sample = fmap <$> sample b <*> sample (signal e)
     , listen = \k -> trigger e $ \r -> case r of
-        Up a -> do
+        Up a   -> do
             f <- atomically $ sample b
             k (Just (f a))
-        _    -> k Nothing
+        Down _ -> k Nothing
     , cached = False
     }
 
