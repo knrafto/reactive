@@ -1,3 +1,4 @@
+{-# LANGUAGE RecursiveDo #-}
 module Main ( main ) where
 
 import           Control.Applicative
@@ -75,6 +76,10 @@ frp = testGroup "FRP"
         , testProperty "filterJust" propFilterJust
         , testProperty "mergeWith"  propMergeWith
         ]
+    , testGroup "Behavior" []
+    , testGroup "Combinators"
+        [ testProperty "accum" propAccum
+        ]
     ]
 
 jiffy :: MonadIO m => Interval a -> m a
@@ -88,6 +93,12 @@ sink e = do
     r <- liftIO $ newIORef []
     on e $ modifyIORef r . (:)
     return $ reverse <$> readIORef r
+
+accum :: a -> Event (a -> a) -> Interval (Event a)
+accum a f = mdo
+    let e = flip ($) <$> b <@> f
+    b <- hold a e
+    return e
 
 propEventMap :: Property
 propEventMap = monadicIO $ do
@@ -135,6 +146,18 @@ propFilterJust = monadicIO $ do
             mapM_ push xs
             out
     assert $ (ys :: [Int]) == catMaybes xs
+
+propAccum :: Property
+propAccum = monadicIO $ do
+    xs <- pick arbitrary
+    ys <- jiffy $ do
+        (e, push) <- newEvent
+        e' <- accum 0 ((+) <$> e)
+        out <- sink e'
+        liftIO $ do
+            mapM_ push xs
+            out
+    assert $ (ys :: [Int]) == tail (scanl (+) 0 xs)
 
 data Pick a = This a | That a | Both a
     deriving (Eq, Ord, Read, Show)
