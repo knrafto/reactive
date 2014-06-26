@@ -160,8 +160,8 @@ instance Cacheable Event where
             initial     <- liftSTM $ sample (signal e)
             (b, update) <- newBehavior initial
             trigger e $ \r -> case r of
-                Up a   -> update (Just a)
-                Down _ -> update Nothing
+                Up a -> update (Just a)
+                _    -> update Nothing
             return (Event b)
 
 instance Cacheable Behavior where
@@ -187,8 +187,8 @@ hold :: a -> Event a -> Interval (Behavior a)
 hold initial e = do
     (b, update) <- newBehavior initial
     trigger e $ \r -> case r of
-        Up _   -> return ()
         Down a -> update a
+        _      -> return ()
     return b
 
 switch :: Behavior (Event a) -> Event a
@@ -198,8 +198,8 @@ execute :: Event (IO a) -> Interval (Event a)
 execute e = do
     (e', push) <- newEvent
     trigger e $ \r -> case r of
-        Up m   -> m >>= push
-        Down _ -> return ()
+        Up m -> m >>= push
+        _    -> return ()
     return e'
 
 infixl 4 <@>, <@
@@ -208,10 +208,10 @@ infixl 4 <@>, <@
 b <@> e = Event Behavior
     { sample = fmap <$> sample b <*> sample (signal e)
     , listen = \k -> trigger e $ \r -> case r of
-        Up a   -> do
+        Up a -> do
             f <- atomically $ sample b
             k (Just (f a))
-        Down _ -> k Nothing
+        _    -> k Nothing
     , cached = False
     }
 
