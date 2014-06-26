@@ -55,9 +55,13 @@ instance Applicative Behavior where
 
     b <*> c = Behavior
         { sample = sample b <*> sample c
-        , listen = \k -> listen c $ \a -> do
-            f <- atomically $ sample b
-            k (f a)
+        , listen = \k -> do
+            listen b $ \f -> do
+                a <- atomically $ sample c
+                k (f a)
+            listen c $ \a -> do
+                f <- atomically $ sample b
+                k (f a)
         , cached = False
         }
 
@@ -129,7 +133,13 @@ switch s = Event (s >>= pulse)
 infixl 4 <@>, <@
 
 (<@>) :: Behavior (a -> b) -> Event a -> Event b
-b <@> e = Event (fmap <$> b <*> pulse e)
+b <@> e = Event Behavior
+    { sample = fmap <$> sample b <*> sample (pulse e)
+    , listen = \k -> listen (pulse e) $ \a -> do
+        f <- atomically $ sample b
+        k (fmap f a)
+    , cached = False
+    }
 
 (<@) :: Behavior b -> Event a -> Event b
 b <@ e = const <$> b <@> e
