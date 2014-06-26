@@ -71,7 +71,10 @@ instance Monad Behavior where
         , listen = \k -> do
             clean <- liftSTM $ newTVar mempty
             listen b $ \a -> do
-                (_, d') <- runInterval $ listen (f a) k
+                let c = f a
+                initial <- atomically $ sample c
+                k initial
+                (_, d') <- runInterval $ listen c k
                 d <- atomically $ swapTVar clean d'
                 dispose d
             atEnd . Dispose $ do
