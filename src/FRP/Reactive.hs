@@ -1,5 +1,4 @@
 {-# LANGUAGE BangPatterns #-}
--- TODO: 'execute'
 module FRP.Reactive
     ( Behavior
     , Event
@@ -14,6 +13,7 @@ module FRP.Reactive
     , filterJust
     , hold
     , switch
+    , execute
     , (<@>)
     , (<@)
     ) where
@@ -75,7 +75,7 @@ instance Monad Behavior where
                 d <- atomically $ swapTVar clean d'
                 dispose d
             atEnd . Dispose $ do
-                d <- atomically $ swapTVar clean mempty
+                d <- atomically $ readTVar clean
                 dispose d
         , cached = False
         }
@@ -116,9 +116,8 @@ newBehavior initial = do
             , cached = True
             }
         update !a = do
-            hs <- atomically $ do
-                writeTVar value a
-                LinkedList.toList ll
+            atomically $ writeTVar value a
+            hs <- atomically $ LinkedList.toList ll
             mapM_ ($ a) hs
     atEnd . Dispose . atomically $ LinkedList.clear ll
     return (b, update)
@@ -177,8 +176,8 @@ instance Cacheable Behavior where
 mergeWith :: (a -> a -> a) -> Event a -> Event a -> Event a
 mergeWith f a b = Event $ combine <$> signal a <*> signal b
   where
-    combine Nothing m         = m
-    combine m       Nothing   = m
+    combine Nothing  m        = m
+    combine m        Nothing  = m
     combine (Just x) (Just y) = Just (f x y)
 
 filterJust :: Event (Maybe a) -> Event a
@@ -194,6 +193,14 @@ hold initial e = do
 
 switch :: Behavior (Event a) -> Event a
 switch s = Event $ s >>= signal
+
+execute :: Event (IO a) -> Interval (Event a)
+execute e = do
+    (e', push) <- newEvent
+    trigger e $ \r -> case r of
+        Up m   -> m >>= push
+        Down _ -> return ()
+    return e'
 
 infixl 4 <@>, <@
 
