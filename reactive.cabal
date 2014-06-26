@@ -19,11 +19,9 @@ library
   ghc-options: -Wall
 
   exposed-modules:
-    FRP.Reactive,
-    FRP.Interval
-
-  other-modules:
-    FRP.LinkedList
+    FRP.Interval,
+    FRP.LinkedList,
+    FRP.Reactive
 
   build-depends:
     base,
@@ -42,6 +40,9 @@ test-suite tests
     HUnit,
     base,
     reactive,
+    QuickCheck,
+    stm,
     tasty,
     tasty-hunit,
-    stm
+    tasty-quickcheck,
+    transformers
