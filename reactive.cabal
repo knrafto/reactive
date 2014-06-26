@@ -1,0 +1,32 @@
+name:                reactive
+version:             0.1.0.0
+-- synopsis:
+-- description:
+license:             BSD3
+license-file:        LICENSE
+author:              Kyle Raftogianis <kylerafto@gmail.com>
+maintainer:          Kyle Raftogianis <kylerafto@gmail.com>
+copyright:           (c) 2014 Kyle Raftogianis
+category:            FRP
+build-type:          Simple
+cabal-version:       >= 1.10
+
+-- extra-source-files:
+
+library
+  hs-source-dirs: src
+  default-language: Haskell98
+  ghc-options: -Wall
+
+  exposed-modules:
+    FRP.Reactive,
+    FRP.Interval
+
+  other-modules:
+    FRP.LinkedList
+
+  build-depends:
+    base,
+    stm,
+    transformers,
+    mtl

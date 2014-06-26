@@ -1,19 +1,22 @@
 {-# LANGUAGE BangPatterns #-}
 -- TODO: 'execute'
-module Reactive
+module FRP.Reactive
     ( Behavior
     , Event
       -- * Combinators
     , mergeWith
     , filterJust
     , hold
+    , switch
     , (<@>)
     , (<@)
       -- * Interface
     , newBehavior
     , newEvent
     , animate
+    , on
     , smooth
+    , smoothWith
     , Cachable(..)
     ) where
 
@@ -22,11 +25,10 @@ import           Control.Concurrent.STM.TVar
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.STM
-import           Data.Maybe
 import           Data.Monoid
 
-import           Interval
-import qualified LinkedList                  as LinkedList
+import           FRP.Interval
+import qualified FRP.LinkedList               as LinkedList
 
 liftSTM :: MonadIO m => STM a -> m a
 liftSTM = liftIO . atomically
@@ -156,16 +158,6 @@ newEvent = do
     (b, push) <- newBehavior Nothing
     return (Event b, \a -> push (Just a) >> push Nothing)
 
-smooth :: (a -> a -> Bool) -> Behavior a -> Interval (Behavior a)
-smooth p b = do
-    initial    <- liftSTM $ sample b
-    latch      <- liftSTM $ newTVar initial
-    (b', push) <- newBehavior initial
-    listen b $ \y -> do
-        x <- atomically $ swapTVar latch y
-        unless (p x y) $ push y
-    return b'
-
 animate :: Behavior a -> (a -> IO ()) -> Interval ()
 animate b f = do
     initial <- liftSTM $ sample b
@@ -175,11 +167,24 @@ animate b f = do
 on :: Event a -> (a -> IO ()) -> Interval ()
 on e f = animate (pulse e) $ maybe (return ()) f
 
+smooth :: Eq a => Behavior a -> Interval (Behavior a)
+smooth = smoothWith (==)
+
+smoothWith :: (a -> a -> Bool) -> Behavior a -> Interval (Behavior a)
+smoothWith p b = do
+    initial    <- liftSTM $ sample b
+    latch      <- liftSTM $ newTVar initial
+    (b', push) <- newBehavior initial
+    listen b $ \y -> do
+        x <- atomically $ swapTVar latch y
+        unless (p x y) $ push y
+    return b'
+
 class Cachable f where
     cache :: f a -> Interval (f a)
 
 instance Cachable Event where
-    cache e = Event <$> smooth flat (pulse e)
+    cache e = Event <$> smoothWith flat (pulse e)
       where
         flat Nothing Nothing = True
         flat _       _       = False

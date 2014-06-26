@@ -1,4 +1,4 @@
-module LinkedList
+module FRP.LinkedList
     ( LinkedList
     , Node
     , empty

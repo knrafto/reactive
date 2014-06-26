@@ -1,5 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module Interval
+module FRP.Interval
     ( Dispose(..)
     , Interval(..)
     , runInterval
@@ -8,7 +8,6 @@ module Interval
 
 import           Control.Applicative
 import           Control.Monad.Writer
-import           Data.Monoid
 
 newtype Dispose = Dispose { dispose :: IO () }
 
