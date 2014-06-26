@@ -37,12 +37,10 @@ test-suite tests
   ghc-options: -Wall -threaded -rtsopts
 
   build-depends:
-    HUnit,
     base,
     reactive,
     QuickCheck,
     stm,
     tasty,
-    tasty-hunit,
     tasty-quickcheck,
     transformers

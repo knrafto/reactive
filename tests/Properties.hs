@@ -1,45 +1,50 @@
 module Main ( main ) where
 
+import           Control.Applicative
 import           Control.Monad.IO.Class
 import           Control.Monad.STM
+import           Data.IORef
 import           Test.QuickCheck.Monadic
 import           Test.Tasty
 import           Test.Tasty.QuickCheck
 
-import           FRP.LinkedList          as LinkedList
+import           FRP.Interval
+import           FRP.LinkedList          (LinkedList)
+import qualified FRP.LinkedList          as LinkedList
+import           FRP.Reactive
 
 linkedList :: TestTree
 linkedList = testGroup "linked list"
-    [ testProperty "empty"  propEmpty
-    , testProperty "insert" propInsert
-    , testProperty "delete" propDelete
-    , testProperty "clear"  propClear
+    [ testProperty "empty"  propListEmpty
+    , testProperty "insert" propListInsert
+    , testProperty "delete" propListDelete
+    , testProperty "clear"  propListClear
     ]
 
 insertAll :: [a] -> LinkedList a -> STM ()
 insertAll xs ll = mapM_ (flip LinkedList.insert ll) xs
 
-propEmpty :: Property
-propEmpty = monadicIO $ do
+propListEmpty :: Property
+propListEmpty = monadicIO $ do
     xs <- liftIO . atomically $ do
         ll <- LinkedList.empty
         LinkedList.toList ll
     assert $ null (xs :: [Int])
 
-propInsert :: Property
-propInsert = monadicIO $ do
-    xs <- pick arbitrary :: PropertyM IO [Int]
+propListInsert :: Property
+propListInsert = monadicIO $ do
+    xs <- pick arbitrary
     ys <- liftIO . atomically $ do
         ll <- LinkedList.empty
         insertAll xs ll
         LinkedList.toList ll
-    assert $ ys == xs
+    assert $ (ys :: [Int]) == xs
 
-propDelete :: Property
-propDelete = monadicIO $ do
-    xs <- pick arbitrary :: PropertyM IO [Int]
-    ys <- pick arbitrary :: PropertyM IO [Int]
-    a  <- pick arbitrary :: PropertyM IO Int
+propListDelete :: Property
+propListDelete = monadicIO $ do
+    xs <- pick arbitrary
+    ys <- pick arbitrary
+    a  <- pick arbitrary
     zs <- liftIO . atomically $ do
         ll <- LinkedList.empty
         insertAll xs ll
@@ -47,21 +52,79 @@ propDelete = monadicIO $ do
         insertAll ys ll
         LinkedList.delete n
         LinkedList.toList ll
-    assert $ zs == xs ++ ys
+    assert $ (zs :: [Int]) == xs ++ ys
 
-propClear :: Property
-propClear = monadicIO $ do
-    xs <- pick arbitrary :: PropertyM IO [Int]
+propListClear :: Property
+propListClear = monadicIO $ do
+    xs <- pick arbitrary
     ys <- liftIO . atomically $ do
         ll <- LinkedList.empty
         insertAll xs ll
         LinkedList.clear ll
         LinkedList.toList ll
-    assert $ null ys
+    assert $ null (ys :: [Int])
+
+frp :: TestTree
+frp = testGroup "FRP"
+    [ testGroup "Event"
+        [ testProperty "fmap"  propEventMap
+        , testProperty "empty" propEventEmpty
+        , testProperty "<|>"   propEventAlt
+        ]
+    ]
+
+jiffy :: MonadIO m => Interval a -> m a
+jiffy m = liftIO $ do
+    (a, d) <- runInterval m
+    dispose d
+    return a
+
+sink :: Event a -> Interval (IO [a])
+sink e = do
+    r <- liftIO $ newIORef []
+    on e $ modifyIORef r . (:)
+    return $ reverse <$> readIORef r
+
+propEventMap :: Property
+propEventMap = monadicIO $ do
+    xs <- pick arbitrary
+    f  <- pick arbitrary
+    ys <- jiffy $ do
+        (e, push) <- newEvent
+        out <- sink (f <$> e)
+        liftIO $ do
+            mapM_ push xs
+            out
+    assert $ (ys :: [Int]) == map f (xs :: [Int])
+
+propEventEmpty :: Property
+propEventEmpty = monadicIO $ do
+    xs <- pick arbitrary
+    (ys1, ys2) <- jiffy $ do
+        (e, push) <- newEvent
+        out1 <- sink (empty <|> e)
+        out2 <- sink (e <|> empty)
+        liftIO $ do
+            mapM_ push xs
+            (,) <$> out1 <*> out2
+    assert $ (ys1 :: [Int]) == xs && (ys2 :: [Int]) == xs
+
+propEventAlt :: Property
+propEventAlt = monadicIO $ do
+    xs <- pick arbitrary
+    ys <- jiffy $ do
+        (e1, pushL) <- newEvent
+        (e2, pushR) <- newEvent
+        out <- sink (e1 <|> e2)
+        liftIO $ do
+            mapM_ (either pushL pushR) xs
+            out
+    assert $ (ys :: [Int]) == map (either id id) xs
 
 tests :: TestTree
 tests = testGroup "tests"
     [ linkedList
+    , frp
     ]
 
 main :: IO ()
