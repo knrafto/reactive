@@ -158,7 +158,7 @@ class Cachable f where
 instance Cachable Event where
     cache e
         | cached (signal e) = return e
-        | otherwise = do
+        | otherwise         = do
             initial     <- liftSTM $ sample (signal e)
             (b, update) <- newBehavior initial
             trigger e $ \r -> case r of

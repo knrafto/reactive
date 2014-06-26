@@ -24,7 +24,7 @@ linkedList = testGroup "linked list"
     ]
 
 insertAll :: [a] -> LinkedList a -> STM ()
-insertAll xs ll = mapM_ (flip LinkedList.insert ll) xs
+insertAll xs ll = mapM_ (`LinkedList.insert` ll) xs
 
 propListEmpty :: Property
 propListEmpty = monadicIO $ do
