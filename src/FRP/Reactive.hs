@@ -3,6 +3,12 @@
 module FRP.Reactive
     ( Behavior
     , Event
+      -- * Interface
+    , newBehavior
+    , newEvent
+    , animate
+    , on
+    , Cachable(..)
       -- * Combinators
     , mergeWith
     , filterJust
@@ -10,14 +16,6 @@ module FRP.Reactive
     , switch
     , (<@>)
     , (<@)
-      -- * Interface
-    , newBehavior
-    , newEvent
-    , animate
-    , on
-    , smooth
-    , smoothWith
-    , Cachable(..)
     ) where
 
 import           Control.Applicative
@@ -82,67 +80,29 @@ instance Monad Behavior where
         , cached = False
         }
 
-newtype Event a = Event { pulse :: Behavior (Maybe a) }
+newtype Event a = Event { signal :: Behavior (Maybe a) }
 
 instance Functor Event where
-    fmap f = Event . fmap (fmap f) . pulse
+    fmap f = Event . fmap (fmap f) . signal
 
 instance Applicative Event where
     pure    = Event . pure . pure
-    f <*> a = Event ((<*>) <$> pulse f <*> pulse a)
+    f <*> a = Event $ (<*>) <$> signal f <*> signal a
 
 instance Alternative Event where
-    empty   = Event (pure empty)
-    a <|> b = Event ((<|>) <$> pulse a <*> pulse b)
+    empty   = Event $ pure empty
+    a <|> b = Event $ (<|>) <$> signal a <*> signal b
 
 instance Monad Event where
     return  = pure
-    e >>= k = Event $ pulse e >>= \m -> case m of
+    e >>= k = Event $ signal e >>= \m -> case m of
         Nothing -> return Nothing
-        Just a  -> pulse (k a)
+        Just a  -> signal (k a)
     fail _  = empty
 
 instance MonadPlus Event where
     mzero = empty
     mplus = (<|>)
-
-mergeWith :: (a -> a -> a) -> Event a -> Event a -> Event a
-mergeWith f a b = Event (combine <$> pulse a <*> pulse b)
-  where
-    combine Nothing m         = m
-    combine m       Nothing   = m
-    combine (Just x) (Just y) = Just (f x y)
-
-filterJust :: Event (Maybe a) -> Event a
-filterJust e = Event (join <$> pulse e)
-
-hold :: a -> Event a -> Interval (Behavior a)
-hold initial e = do
-    latch     <- liftSTM $ sample (pulse e) >>= newTVar
-    (b, push) <- newBehavior initial
-    listen (pulse e) $ \y -> do
-        x <- atomically $ swapTVar latch y
-        case (x, y) of
-            (Just a, Nothing) -> push a
-            _                 -> return ()
-    return b
-
-switch :: Behavior (Event a) -> Event a
-switch s = Event (s >>= pulse)
-
-infixl 4 <@>, <@
-
-(<@>) :: Behavior (a -> b) -> Event a -> Event b
-b <@> e = Event Behavior
-    { sample = fmap <$> sample b <*> sample (pulse e)
-    , listen = \k -> listen (pulse e) $ \a -> do
-        f <- atomically $ sample b
-        k (fmap f a)
-    , cached = False
-    }
-
-(<@) :: Behavior b -> Event a -> Event b
-b <@ e = const <$> b <@> e
 
 newBehavior :: a -> Interval (Behavior a, a -> IO ())
 newBehavior initial = do
@@ -155,18 +115,18 @@ newBehavior initial = do
                 atEnd . Dispose . atomically $ LinkedList.delete node
             , cached = True
             }
-        push !a = do
+        update !a = do
             hs <- atomically $ do
                 writeTVar value a
                 LinkedList.toList ll
             mapM_ ($ a) hs
     atEnd . Dispose . atomically $ LinkedList.clear ll
-    return (b, push)
+    return (b, update)
 
 newEvent :: Interval (Event a, a -> IO ())
 newEvent = do
-    (b, push) <- newBehavior Nothing
-    return (Event b, \a -> push (Just a) >> push Nothing)
+    (b, update) <- newBehavior Nothing
+    return (Event b, \a -> update (Just a) >> update Nothing)
 
 animate :: Behavior a -> (a -> IO ()) -> Interval ()
 animate b f = do
@@ -174,42 +134,80 @@ animate b f = do
     liftIO $ f initial
     listen b f
 
-on :: Event a -> (a -> IO ()) -> Interval ()
-on e f = do
-    b <- smoothWith flat (pulse e)
-    animate b $ maybe (return ()) f
-  where
-    flat Nothing  Nothing  = True
-    flat (Just _) (Just _) = True
-    flat _        _        = False
+data Edge a = Up a | Down a
 
-smooth :: Eq a => Behavior a -> Interval (Behavior a)
-smooth = smoothWith (==)
-
-smoothWith :: (a -> a -> Bool) -> Behavior a -> Interval (Behavior a)
-smoothWith p b = do
-    initial    <- liftSTM $ sample b
-    latch      <- liftSTM $ newTVar initial
-    (b', push) <- newBehavior initial
-    listen b $ \y -> do
+trigger :: Event a -> (Edge a -> IO ()) -> Interval ()
+trigger e f = do
+    latch <- liftSTM $ sample (signal e) >>= newTVar
+    listen (signal e) $ \y -> do
         x <- atomically $ swapTVar latch y
-        unless (p x y) $ push y
-    return b'
+        case (x, y) of
+            (Nothing, Just a ) -> f (Up a)
+            (Just a , Nothing) -> f (Down a)
+            _                  -> return ()
+
+on :: Event a -> (a -> IO ()) -> Interval ()
+on e f = trigger e rise
+  where
+    rise (Up a) = f a
+    rise _      = return ()
 
 class Cachable f where
     cache :: f a -> Interval (f a)
 
 instance Cachable Event where
-    cache e = Event <$> smoothWith flat (pulse e)
-      where
-        flat Nothing Nothing = True
-        flat _       _       = False
+    cache e
+        | cached (signal e) = return e
+        | otherwise = do
+            initial     <- liftSTM $ sample (signal e)
+            (b, update) <- newBehavior initial
+            trigger e $ \r -> case r of
+                Up a -> update (Just a)
+                _    -> update Nothing
+            return (Event b)
 
 instance Cachable Behavior where
     cache b
         | cached b  = return b
         | otherwise = do
-            initial    <- liftSTM $ sample b
-            (b', push) <- newBehavior initial
-            listen b push
+            initial      <- liftSTM $ sample b
+            (b', update) <- newBehavior initial
+            listen b update
             return b'
+
+mergeWith :: (a -> a -> a) -> Event a -> Event a -> Event a
+mergeWith f a b = Event $ combine <$> signal a <*> signal b
+  where
+    combine Nothing m         = m
+    combine m       Nothing   = m
+    combine (Just x) (Just y) = Just (f x y)
+
+filterJust :: Event (Maybe a) -> Event a
+filterJust e = Event $ join <$> signal e
+
+hold :: a -> Event a -> Interval (Behavior a)
+hold initial e = do
+    (b, update) <- newBehavior initial
+    trigger e $ \r -> case r of
+        Down a -> update a
+        _      -> return ()
+    return b
+
+switch :: Behavior (Event a) -> Event a
+switch s = Event $ s >>= signal
+
+infixl 4 <@>, <@
+
+(<@>) :: Behavior (a -> b) -> Event a -> Event b
+b <@> e = Event Behavior
+    { sample = fmap <$> sample b <*> sample (signal e)
+    , listen = \k -> trigger e $ \r -> case r of
+        Up a -> do
+            f <- atomically $ sample b
+            k (Just (f a))
+        _    -> k Nothing
+    , cached = False
+    }
+
+(<@) :: Behavior b -> Event a -> Event b
+b <@ e = const <$> b <@> e
