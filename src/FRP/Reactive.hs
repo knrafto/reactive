@@ -175,7 +175,13 @@ animate b f = do
     listen b f
 
 on :: Event a -> (a -> IO ()) -> Interval ()
-on e f = animate (pulse e) $ maybe (return ()) f
+on e f = do
+    b <- smoothWith flat (pulse e)
+    animate b $ maybe (return ()) f
+  where
+    flat Nothing  Nothing  = True
+    flat (Just _) (Just _) = True
+    flat _        _        = False
 
 smooth :: Eq a => Behavior a -> Interval (Behavior a)
 smooth = smoothWith (==)

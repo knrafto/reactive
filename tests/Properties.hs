@@ -1,9 +1,11 @@
 module Main ( main ) where
 
 import           Control.Applicative
+import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.STM
 import           Data.IORef
+import           Data.Maybe
 import           Test.QuickCheck.Monadic
 import           Test.Tasty
 import           Test.Tasty.QuickCheck
@@ -67,9 +69,11 @@ propListClear = monadicIO $ do
 frp :: TestTree
 frp = testGroup "FRP"
     [ testGroup "Event"
-        [ testProperty "fmap"  propEventMap
-        , testProperty "empty" propEventEmpty
-        , testProperty "<|>"   propEventAlt
+        [ testProperty "fmap"       propEventMap
+        , testProperty "empty"      propEventEmpty
+        , testProperty "<|>"        propEventAlt
+        , testProperty "filterJust" propFilterJust
+        , testProperty "mergeWith"  propMergeWith
         ]
     ]
 
@@ -120,6 +124,46 @@ propEventAlt = monadicIO $ do
             mapM_ (either pushL pushR) xs
             out
     assert $ (ys :: [Int]) == map (either id id) xs
+
+propFilterJust :: Property
+propFilterJust = monadicIO $ do
+    xs <- pick arbitrary
+    ys <- jiffy $ do
+        (e, push) <- newEvent
+        out <- sink (filterJust e)
+        liftIO $ do
+            mapM_ push xs
+            out
+    assert $ (ys :: [Int]) == catMaybes xs
+
+data Pick a = This a | That a | Both a
+    deriving (Eq, Ord, Read, Show)
+
+instance Arbitrary a => Arbitrary (Pick a) where
+    arbitrary = oneof
+        [This <$> arbitrary, That <$> arbitrary, Both <$> arbitrary]
+
+collapsePick :: (a -> a -> a) -> Pick a -> a
+collapsePick _ (This a) = a
+collapsePick _ (That a) = a
+collapsePick f (Both a) = f a a
+
+propMergeWith :: Property
+propMergeWith = monadicIO $ do
+    xs <- pick arbitrary
+    f  <- pick arbitrary
+    ys <- jiffy $ do
+        (e1, push1) <- newEvent
+        (e2, push2) <- newEvent
+        (e3, push3) <- newEvent
+        out <- sink (mergeWith f (e1 <|> e3) (e2 <|> e3))
+        liftIO $ do
+            forM_ xs $ \x -> case x of
+                This a -> push1 a
+                That a -> push2 a
+                Both a -> push3 a
+            out
+    assert $ (ys :: [Int]) == map (collapsePick f) xs
 
 tests :: TestTree
 tests = testGroup "tests"
