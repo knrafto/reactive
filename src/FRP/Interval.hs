@@ -1,6 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module FRP.Interval
-    ( Dispose(..)
+    ( Dispose
     , dispose
     , Interval(..)
     , runInterval
@@ -10,20 +10,14 @@ module FRP.Interval
 import           Control.Applicative
 import           Control.Monad.Writer.Strict
 
-data Dispose
-    = Empty
-    | Dispose !(IO ())
+newtype Dispose = Dispose { runDispose :: IO () -> IO () }
 
 instance Monoid Dispose where
-    mempty = Empty
-
-    Empty     `mappend` b         = b
-    a         `mappend` Empty     = a
-    Dispose a `mappend` Dispose b = Dispose (a >> b)
+    mempty                        = Dispose id
+    Dispose f `mappend` Dispose g = Dispose (f . g)
 
 dispose :: Dispose -> IO ()
-dispose Empty       = return ()
-dispose (Dispose m) = m
+dispose d = runDispose d (return ())
 
 newtype Interval a = Interval { unInterval :: WriterT Dispose IO a }
     deriving (Functor, Applicative, Monad, MonadFix, MonadIO, MonadWriter Dispose)
@@ -31,5 +25,5 @@ newtype Interval a = Interval { unInterval :: WriterT Dispose IO a }
 runInterval :: Interval a -> IO (a, Dispose)
 runInterval = runWriterT . unInterval
 
-atEnd :: Dispose -> Interval ()
-atEnd = tell
+atEnd :: IO () -> Interval ()
+atEnd m = tell $ Dispose (m >>)
