@@ -8,11 +8,11 @@ module FRP.Interval
     ) where
 
 import           Control.Applicative
-import           Control.Monad.Writer
+import           Control.Monad.Writer.Strict
 
 data Dispose
     = Empty
-    | Dispose (IO ())
+    | Dispose !(IO ())
 
 instance Monoid Dispose where
     mempty = Empty
