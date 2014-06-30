@@ -191,14 +191,7 @@ execute e = do
 infixl 4 <@>, <@
 
 (<@>) :: Behavior (a -> b) -> Event a -> Event b
-b <@> e = Event Behavior
-    { sample = fmap <$> sample b <*> sample (pulse e)
-    , listen = \k ->
-        listen (pulse e) $ \a -> do
-            f <- atomically $ sample b
-            k (f <$> a)
-    , cached = False
-    }
+b <@> e = Event $ fmap <$> b <*> pulse e
 
 (<@) :: Behavior b -> Event a -> Event b
 b <@ e = const <$> b <@> e
