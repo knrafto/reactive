@@ -18,21 +18,21 @@ module FRP.Reactive
     ) where
 
 import           Control.Applicative
-import           Control.Concurrent.STM.TVar
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.STM
+import           Data.IORef
 import           Data.Monoid
 
 import           FRP.Interval
 import qualified FRP.LinkedList               as LinkedList
 
-liftSTM :: MonadIO m => STM a -> m a
-liftSTM = liftIO . atomically
+swapIORef :: IORef a -> a -> IO a
+swapIORef r a = atomicModifyIORef' r $ \b -> (a, b)
 
 data Behavior a = Behavior
-    { sample :: STM a
-    , listen :: (a -> IO ()) -> Interval ()
+    { sample :: IO a
+    , listen :: (a -> IO ()) -> IO Dispose
     , cached :: Bool
     }
 
@@ -46,19 +46,20 @@ instance Functor Behavior where
 instance Applicative Behavior where
     pure a = Behavior
         { sample = return a
-        , listen = \_ -> return ()
+        , listen = \_ -> return mempty
         , cached = True
         }
 
     b <*> c = Behavior
         { sample = sample b <*> sample c
         , listen = \k -> do
-            listen c $ \a -> do
-                f <- atomically $ sample b
+            d1 <- listen c $ \a -> do
+                f <- sample b
                 k (f a)
-            listen b $ \f -> do
-                a <- atomically $ sample c
+            d2 <- listen b $ \f -> do
+                a <- sample c
                 k (f a)
+            return (d1 <> d2)
         , cached = False
         }
 
@@ -68,17 +69,18 @@ instance Monad Behavior where
     b >>= f = Behavior
         { sample = sample b >>= sample . f
         , listen = \k -> do
-            clean <- liftSTM $ newTVar mempty
-            listen b $ \a -> do
+            clean <- liftIO $ newIORef mempty
+            d1 <- listen b $ \a -> do
                 let c = f a
-                initial <- atomically $ sample c
+                initial <- sample c
                 k initial
-                (_, d') <- runInterval $ listen c k
-                d <- atomically $ swapTVar clean d'
+                d' <- listen c k
+                d <- swapIORef clean d'
                 dispose d
-            atEnd $ do
-                d <- atomically $ readTVar clean
-                dispose d
+            return . toDispose $ do
+                dispose d1
+                d2 <- readIORef clean
+                dispose d2
         , cached = False
         }
 
@@ -108,17 +110,17 @@ instance MonadPlus Event where
 
 newBehavior :: a -> Interval (Behavior a, a -> IO ())
 newBehavior initial = do
-    value <- liftSTM $ newTVar initial
-    ll    <- liftSTM LinkedList.empty
+    value <- liftIO $ newIORef initial
+    ll    <- liftIO $ atomically LinkedList.empty
     let b = Behavior
-            { sample = readTVar value
+            { sample = readIORef value
             , listen = \k -> do
-                node <- liftSTM $ LinkedList.insert k ll
-                atEnd . atomically $ LinkedList.delete node
+                node <- atomically $ LinkedList.insert k ll
+                return . toDispose . atomically $ LinkedList.delete node
             , cached = True
             }
         update !a = do
-            atomically $ writeTVar value a
+            writeIORef value a
             hs <- atomically $ LinkedList.toList ll
             mapM_ ($ a) hs
     atEnd . atomically $ LinkedList.clear ll
@@ -131,15 +133,15 @@ newEvent = do
 
 animate :: Behavior a -> (a -> IO ()) -> Interval ()
 animate b f = do
-    initial <- liftSTM $ sample b
+    initial <- liftIO $ sample b
     liftIO $ f initial
-    listen b f
+    later $ listen b f
 
 on :: Event a -> (a -> IO ()) -> Interval ()
 on e f = do
-    latch <- liftSTM $ newTVar Nothing
-    listen (pulse e) $ \y -> do
-        x <- atomically $ swapTVar latch y
+    latch <- liftIO $ newIORef Nothing
+    later $ listen (pulse e) $ \y -> do
+        x <- swapIORef latch y
         case (x, y) of
             (Just a, Nothing) -> f a
             _                 -> return ()
@@ -151,11 +153,11 @@ instance Cacheable Event where
     cache e
         | cached (pulse e) = return e
         | otherwise        = do
-            a           <- liftSTM $ sample (pulse e)
-            latch       <- liftSTM $ newTVar a
+            a           <- liftIO $ sample (pulse e)
+            latch       <- liftIO $ newIORef a
             (b, update) <- newBehavior a
-            listen (pulse e) $ \y -> do
-                x <- atomically $ swapTVar latch y
+            later $ listen (pulse e) $ \y -> do
+                x <- swapIORef latch y
                 case (x, y) of
                     (Nothing, Nothing) -> return ()
                     _                  -> update y
@@ -165,9 +167,9 @@ instance Cacheable Behavior where
     cache b
         | cached b  = return b
         | otherwise = do
-            a            <- liftSTM $ sample b
+            a            <- liftIO $ sample b
             (b', update) <- newBehavior a
-            listen b update
+            later $ listen b update
             return b'
 
 filterJust :: Event (Maybe a) -> Event a

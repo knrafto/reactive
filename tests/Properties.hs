@@ -80,12 +80,6 @@ frp = testGroup "FRP"
         ]
     ]
 
-jiffy :: MonadIO m => Interval a -> m a
-jiffy m = liftIO $ do
-    (a, d) <- runInterval m
-    dispose d
-    return a
-
 sink :: Event a -> Interval (IO [a])
 sink e = do
     r <- liftIO $ newIORef []
@@ -102,59 +96,69 @@ propEventMap :: Property
 propEventMap = monadicIO $ do
     xs <- pick arbitrary
     f  <- pick arbitrary
-    ys <- jiffy $ do
-        (e, push) <- newEvent
-        out <- sink (f <$> e)
-        liftIO $ do
-            mapM_ push xs
-            out
+    ys <- liftIO $ do
+        ((push, out), d) <- runInterval $ do
+            (e, push) <- newEvent
+            out <- sink (f <$> e)
+            return (push, out)
+        mapM_ push xs
+        dispose d
+        out
     assert $ (ys :: [Int]) == map f (xs :: [Int])
 
 propEventEmpty :: Property
 propEventEmpty = monadicIO $ do
     xs <- pick arbitrary
-    (ys1, ys2) <- jiffy $ do
-        (e, push) <- newEvent
-        out1 <- sink (empty <|> e)
-        out2 <- sink (e <|> empty)
-        liftIO $ do
-            mapM_ push xs
-            (,) <$> out1 <*> out2
+    (ys1, ys2) <- liftIO $ do
+        ((push, out1, out2), d) <- runInterval $ do
+            (e, push) <- newEvent
+            out1 <- sink (empty <|> e)
+            out2 <- sink (e <|> empty)
+            return (push, out1, out2)
+        mapM_ push xs
+        dispose d
+        (,) <$> out1 <*> out2
     assert $ (ys1 :: [Int]) == xs && (ys2 :: [Int]) == xs
 
 propEventAlt :: Property
 propEventAlt = monadicIO $ do
     xs <- pick arbitrary
-    ys <- jiffy $ do
-        (e1, pushL) <- newEvent
-        (e2, pushR) <- newEvent
-        out <- sink (e1 <|> e2)
-        liftIO $ do
-            mapM_ (either pushL pushR) xs
-            out
+    ys <- liftIO $ do
+        ((pushL, pushR, out), d) <- runInterval $ do
+            (e1, pushL) <- newEvent
+            (e2, pushR) <- newEvent
+            out <- sink (e1 <|> e2)
+            return (pushL, pushR, out)
+        mapM_ (either pushL pushR) xs
+        dispose d
+        out
     assert $ (ys :: [Int]) == map (either id id) xs
 
 propFilterJust :: Property
 propFilterJust = monadicIO $ do
     xs <- pick arbitrary
-    ys <- jiffy $ do
-        (e, push) <- newEvent
-        out <- sink (filterJust e)
-        liftIO $ do
-            mapM_ push xs
-            out
+    ys <- liftIO $ do
+        ((push, out), d) <- runInterval $ do
+            (e, push) <- newEvent
+            out <- sink (filterJust e)
+            return (push, out)
+        mapM_ push xs
+        dispose d
+        out
     assert $ (ys :: [Int]) == catMaybes xs
 
 propAccum :: Property
 propAccum = monadicIO $ do
     xs <- pick arbitrary
-    ys <- jiffy $ do
-        (e, push) <- newEvent
-        e' <- accum 0 ((+) <$> e)
-        out <- sink e'
-        liftIO $ do
-            mapM_ push xs
-            out
+    ys <- liftIO $ do
+        ((push, out), d) <- runInterval $ do
+            (e, push) <- newEvent
+            e' <- accum 0 ((+) <$> e)
+            out <- sink e'
+            return (push, out)
+        mapM_ push xs
+        dispose d
+        out
     assert $ (ys :: [Int]) == tail (scanl (+) 0 xs)
 
 tests :: TestTree
