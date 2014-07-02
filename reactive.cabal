@@ -25,9 +25,8 @@ library
 
   build-depends:
     base,
-    stm,
-    transformers,
-    mtl
+    mtl,
+    stm
 
 test-suite tests
   type: exitcode-stdio-1.0
@@ -38,9 +37,9 @@ test-suite tests
 
   build-depends:
     base,
-    reactive,
+    mtl,
     QuickCheck,
+    reactive,
     stm,
     tasty,
-    tasty-quickcheck,
-    transformers
+    tasty-quickcheck

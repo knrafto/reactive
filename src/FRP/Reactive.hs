@@ -19,13 +19,13 @@ module FRP.Reactive
 
 import           Control.Applicative
 import           Control.Monad
-import           Control.Monad.IO.Class
 import           Control.Monad.STM
+import           Control.Monad.Trans
 import           Data.IORef
 import           Data.Monoid
 
 import           FRP.Interval
-import qualified FRP.LinkedList               as LinkedList
+import qualified FRP.LinkedList      as LinkedList
 
 swapIORef :: IORef a -> a -> IO a
 swapIORef r a = atomicModifyIORef' r $ \b -> (a, b)

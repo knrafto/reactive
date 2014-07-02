@@ -2,8 +2,8 @@
 module Main ( main ) where
 
 import           Control.Applicative
-import           Control.Monad.IO.Class
 import           Control.Monad.STM
+import           Control.Monad.Trans
 import           Data.IORef
 import           Data.Maybe
 import           Test.QuickCheck.Monadic
