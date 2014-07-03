@@ -97,7 +97,7 @@ propEventMap = monadicIO $ do
     xs <- pick arbitrary
     f  <- pick arbitrary
     ys <- liftIO $ do
-        ((push, out), dispose) <- suspendInterval $ do
+        ((push, out), dispose) <- suspend $ do
             (e, push) <- newEvent
             out <- sink (f <$> e)
             return (push, out)
@@ -110,7 +110,7 @@ propEventEmpty :: Property
 propEventEmpty = monadicIO $ do
     xs <- pick arbitrary
     (ys1, ys2) <- liftIO $ do
-        ((push, out1, out2), dispose) <- suspendInterval $ do
+        ((push, out1, out2), dispose) <- suspend $ do
             (e, push) <- newEvent
             out1 <- sink (empty <|> e)
             out2 <- sink (e <|> empty)
@@ -124,7 +124,7 @@ propEventAlt :: Property
 propEventAlt = monadicIO $ do
     xs <- pick arbitrary
     ys <- liftIO $ do
-        ((pushL, pushR, out), dispose) <- suspendInterval $ do
+        ((pushL, pushR, out), dispose) <- suspend $ do
             (e1, pushL) <- newEvent
             (e2, pushR) <- newEvent
             out <- sink (e1 <|> e2)
@@ -138,7 +138,7 @@ propFilterJust :: Property
 propFilterJust = monadicIO $ do
     xs <- pick arbitrary
     ys <- liftIO $ do
-        ((push, out), dispose) <- suspendInterval $ do
+        ((push, out), dispose) <- suspend $ do
             (e, push) <- newEvent
             out <- sink (filterJust e)
             return (push, out)
@@ -151,7 +151,7 @@ propAccum :: Property
 propAccum = monadicIO $ do
     xs <- pick arbitrary
     ys <- liftIO $ do
-        ((push, out), dispose) <- suspendInterval $ do
+        ((push, out), dispose) <- suspend $ do
             (e, push) <- newEvent
             e' <- accum 0 ((+) <$> e)
             out <- sink e'

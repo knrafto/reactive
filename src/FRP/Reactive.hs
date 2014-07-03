@@ -23,7 +23,6 @@ import           Control.Monad.STM
 import           Control.Monad.Trans
 import           Data.IORef
 
-import           FRP.Managed
 import           FRP.Interval
 import qualified FRP.LinkedList      as LinkedList
 
@@ -73,7 +72,7 @@ instance Monad Behavior where
                 let c = f a
                 initial <- sample c
                 k initial
-                (_, d) <- suspend (listen c k)
+                (_, d) <- runManaged (listen c k)
                 join (swapIORef clean d)
             finally $ join (readIORef clean)
         , cached = False
@@ -109,9 +108,9 @@ newBehavior initial = do
     ll    <- liftIO $ atomically LinkedList.empty
     let b = Behavior
             { sample = readIORef value
-            , listen = \k -> void $ bracket
-                (atomically $ LinkedList.insert k ll)
-                (atomically . LinkedList.delete)
+            , listen = \k -> do
+                node <- liftIO . atomically $ LinkedList.insert k ll
+                finally . atomically $ LinkedList.delete node
             , cached = True
             }
         update !a = do
