@@ -21,6 +21,7 @@ library
   exposed-modules:
     FRP.Interval,
     FRP.LinkedList,
+    FRP.Managed,
     FRP.Reactive
 
   build-depends:

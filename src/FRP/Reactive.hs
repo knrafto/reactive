@@ -22,8 +22,8 @@ import           Control.Monad
 import           Control.Monad.STM
 import           Control.Monad.Trans
 import           Data.IORef
-import           Data.Monoid
 
+import           FRP.Managed
 import           FRP.Interval
 import qualified FRP.LinkedList      as LinkedList
 
@@ -32,7 +32,7 @@ swapIORef r a = atomicModifyIORef' r $ \b -> (a, b)
 
 data Behavior a = Behavior
     { sample :: IO a
-    , listen :: (a -> IO ()) -> IO Dispose
+    , listen :: (a -> IO ()) -> Managed ()
     , cached :: Bool
     }
 
@@ -46,20 +46,19 @@ instance Functor Behavior where
 instance Applicative Behavior where
     pure a = Behavior
         { sample = return a
-        , listen = \_ -> return mempty
+        , listen = \_ -> return ()
         , cached = True
         }
 
     b <*> c = Behavior
         { sample = sample b <*> sample c
         , listen = \k -> do
-            d1 <- listen c $ \a -> do
+            listen c $ \a -> do
                 f <- sample b
                 k (f a)
-            d2 <- listen b $ \f -> do
+            listen b $ \f -> do
                 a <- sample c
                 k (f a)
-            return (d1 <> d2)
         , cached = False
         }
 
@@ -69,18 +68,14 @@ instance Monad Behavior where
     b >>= f = Behavior
         { sample = sample b >>= sample . f
         , listen = \k -> do
-            clean <- liftIO $ newIORef mempty
-            d1 <- listen b $ \a -> do
+            clean <- liftIO $ newIORef (return ())
+            listen b $ \a -> do
                 let c = f a
                 initial <- sample c
                 k initial
-                d' <- listen c k
-                d <- swapIORef clean d'
-                dispose d
-            return . toDispose $ do
-                dispose d1
-                d2 <- readIORef clean
-                dispose d2
+                (_, d) <- suspend (listen c k)
+                join (swapIORef clean d)
+            finally $ join (readIORef clean)
         , cached = False
         }
 
@@ -114,16 +109,16 @@ newBehavior initial = do
     ll    <- liftIO $ atomically LinkedList.empty
     let b = Behavior
             { sample = readIORef value
-            , listen = \k -> do
-                node <- atomically $ LinkedList.insert k ll
-                return . toDispose . atomically $ LinkedList.delete node
+            , listen = \k -> void $ bracket
+                (atomically $ LinkedList.insert k ll)
+                (atomically . LinkedList.delete)
             , cached = True
             }
         update !a = do
             writeIORef value a
             hs <- atomically $ LinkedList.toList ll
             mapM_ ($ a) hs
-    atEnd . atomically $ LinkedList.clear ll
+    defer . finally . atomically $ LinkedList.clear ll
     return (b, update)
 
 newEvent :: Interval (Event a, a -> IO ())
@@ -135,12 +130,12 @@ animate :: Behavior a -> (a -> IO ()) -> Interval ()
 animate b f = do
     initial <- liftIO $ sample b
     liftIO $ f initial
-    later $ listen b f
+    defer $ listen b f
 
 on :: Event a -> (a -> IO ()) -> Interval ()
 on e f = do
     latch <- liftIO $ newIORef Nothing
-    later $ listen (pulse e) $ \y -> do
+    defer $ listen (pulse e) $ \y -> do
         x <- swapIORef latch y
         case (x, y) of
             (Just a, Nothing) -> f a
@@ -156,7 +151,7 @@ instance Cacheable Event where
             a           <- liftIO $ sample (pulse e)
             latch       <- liftIO $ newIORef a
             (b, update) <- newBehavior a
-            later $ listen (pulse e) $ \y -> do
+            defer $ listen (pulse e) $ \y -> do
                 x <- swapIORef latch y
                 case (x, y) of
                     (Nothing, Nothing) -> return ()
@@ -169,7 +164,7 @@ instance Cacheable Behavior where
         | otherwise = do
             a            <- liftIO $ sample b
             (b', update) <- newBehavior a
-            later $ listen b update
+            defer $ listen b update
             return b'
 
 filterJust :: Event (Maybe a) -> Event a

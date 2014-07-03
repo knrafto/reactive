@@ -1,52 +1,35 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module FRP.Interval
-    ( Dispose
-    , toDispose
-    , dispose
-    , Interval(..)
-    , runInterval
-    , later
-    , atEnd
+    ( Interval
+    , suspendInterval
+    , defer
     ) where
 
 import           Control.Applicative
 import           Control.Monad.Writer.Strict
 
-newtype Dispose = Dispose (IO () -> IO ())
+import           FRP.Managed
 
-instance Monoid Dispose where
-    mempty = Dispose id
-    Dispose f `mappend` Dispose g = Dispose (f . g)
+newtype Action m = Action (m () -> m ())
 
-toDispose :: IO () -> Dispose
-toDispose m = Dispose (m >>)
+instance Monoid (Action m) where
+    mempty = Action id
+    Action f `mappend` Action g = Action (f . g)
 
-dispose :: Dispose -> IO ()
-dispose (Dispose f) = f (return ())
+action :: Monad m => m () -> Action m
+action m = Action (m >>)
 
-newtype Setup = Setup (IO Dispose -> IO Dispose)
+runAction :: Monad m => Action m -> m ()
+runAction (Action f) = f (return ())
 
-instance Monoid Setup where
-    mempty = Setup id
-    Setup f `mappend` Setup g = Setup (f . g)
-
-setup :: IO Dispose -> Setup
-setup m = Setup (liftA2 mappend m)
-
-runSetup :: Setup -> IO Dispose
-runSetup (Setup f) = f (return mempty)
-
-newtype Interval a = Interval (WriterT Setup IO a)
+newtype Interval a = Interval { runInterval :: WriterT (Action Managed) IO a }
     deriving (Functor, Applicative, Monad, MonadFix, MonadIO)
 
-runInterval :: Interval a -> IO (a, Dispose)
-runInterval (Interval m) = do
-    (a, s) <- runWriterT m
-    d <- runSetup s
+suspendInterval :: Interval a -> IO (a, IO ())
+suspendInterval m = do
+    (a, s) <- runWriterT (runInterval m)
+    (_, d) <- suspend (runAction s)
     return (a, d)
 
-later :: IO Dispose -> Interval ()
-later = Interval . tell . setup
-
-atEnd :: IO () -> Interval ()
-atEnd = later . return . toDispose
+defer :: Managed () -> Interval ()
+defer = Interval . tell . action
